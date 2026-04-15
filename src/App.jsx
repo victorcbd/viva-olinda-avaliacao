@@ -363,7 +363,7 @@ function TabAvaliar({ codigo, setCodigo, exp, exps, salvar }) {
                   const key = d.id + "_" + (i + 1); return (
                     <div key={key} style={{ marginBottom: "1.5rem", paddingBottom: "1.5rem", borderBottom: i < d.perguntas.length - 1 ? `1px solid ${T.borda}` : "none" }}>
                       <p style={{ fontSize: 16, color: T.tinta, margin: "0 0 1rem", lineHeight: 1.7 }}>{p}</p>
-                      <StrellasInput valor={notas[key]} onChange={v => setNotas(n => ({ ...n, [key]: v }))} tam={40} />
+                      <EstrelaInput valor={notas[key]} onChange={v => setNotas(n => ({ ...n, [key]: v }))} tam={40} />
                     </div>
                   );
                 })}
