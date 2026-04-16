@@ -77,6 +77,22 @@ function calcNotaAv(notas) {
   return tP > 0 ? +(tN / tP).toFixed(2) : null;
 }
 
+function gerarSintese(exp) {
+  const avs = exp.avaliacoes || [];
+  if (avs.length < 3) return "";
+  const nota = calcNota(avs);
+  if (!nota) return "";
+  const dimScores = DIMS.map(d => { let tot = 0, cnt = 0; for (let i = 1; i <= d.perguntas.length; i++) { const vals = avs.map(a => a.notas?.[d.id + "_" + i]).filter(v => v !== undefined); if (vals.length) { tot += vals.reduce((a, b) => a + b, 0) / vals.length; cnt++; } } return { d, score: cnt ? +(tot / cnt).toFixed(2) : 0 }; }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+  const pontos = dimScores.slice(0, 2).map(x => x.d.nome.toLowerCase());
+  const obsColetadas = [];
+  for (const av of avs) { for (const d of DIMS) { const txt = av.obs?.[d.id]?.trim(); if (txt && txt.length > 20) obsColetadas.push(txt); } }
+  const nivel = nota >= 4.5 ? "excelência" : nota >= 4 ? "alto nível de qualidade" : nota >= 3.5 ? "qualidade certificada" : "aprovação condicional";
+  let s = `Com nota ${nota.toFixed(1)} atribuída por ${avs.length} curadores independentes do Lab Viva Olinda, esta experiência recebeu reconhecimento de ${nivel}. `;
+  if (pontos.length >= 2) s += `Os avaliadores destacaram especialmente a ${pontos[0]} e a ${pontos[1]} como os principais diferenciais da experiência. `;
+  if (obsColetadas.length > 0) { const melhor = obsColetadas.sort((a, b) => b.length - a.length)[0]; const frase = melhor[0].toUpperCase() + melhor.slice(1); s += `"${frase.endsWith(".") ? frase : frase + "."}"` ; }
+  return s.trim();
+}
+
 function Estrelas({ nota, tam = 20 }) {
   if (!nota) return null;
   const c = Math.floor(nota), m = nota - c >= 0.3 && nota - c < 0.8 ? 1 : 0, v = 5 - c - m;
@@ -383,11 +399,96 @@ function TabAvaliar({ codigo, setCodigo, exp, exps, salvar }) {
   );
 }
 
+function RelatorioModal({ exp, onClose }) {
+  if (!exp) return null;
+  const avs = exp.avaliacoes || [];
+  const nota = calcNota(avs);
+  const st = STATUS[exp.status] || STATUS.avaliacao;
+  const hoje = new Date().toLocaleDateString("pt-BR");
+  const dimStats = DIMS.map(d => {
+    const stats = d.perguntas.map((p, i) => { const key = d.id + "_" + (i + 1); const vals = avs.map(a => a.notas?.[key]).filter(v => v !== undefined); const media = vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : null; return { p, key, vals, media }; });
+    const valid = stats.filter(s => s.media !== null);
+    const media = valid.length ? +(valid.reduce((a, s) => a + s.media, 0) / valid.length).toFixed(2) : null;
+    const obs = avs.map((av, i) => av.obs?.[d.id]?.trim() ? { nome: av.nome, txt: av.obs[d.id].trim() } : null).filter(Boolean);
+    return { d, stats, media, obs };
+  });
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,30,20,.72)", zIndex: 2000, overflowY: "auto", padding: "2rem 1rem" }}>
+      <div style={{ background: T.branco, borderRadius: 20, maxWidth: 780, margin: "0 auto", border: `2px solid ${T.verde}` }}>
+        <div style={{ background: T.floresta, borderRadius: "18px 18px 0 0", padding: "2.5rem 2.5rem 2rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
+            <div>
+              <div style={{ fontSize: 11, letterSpacing: ".2em", textTransform: "uppercase", color: "rgba(200,237,217,.65)", fontFamily: "sans-serif", marginBottom: 10 }}>Relatório Interno de Avaliação · Lab Viva Olinda</div>
+              <h2 style={{ fontSize: "clamp(1.3rem,3vw,1.8rem)", color: "white", margin: "0 0 8px", fontWeight: 400 }}>{exp.nome}</h2>
+              <p style={{ margin: 0, fontSize: 14, color: "rgba(200,237,217,.7)", fontFamily: "sans-serif" }}>Gerado em {hoje} · {avs.length} avaliador{avs.length !== 1 ? "es" : ""} · Cód. {exp.code}</p>
+            </div>
+            <button onClick={onClose} style={{ background: "rgba(255,255,255,.1)", border: "1.5px solid rgba(255,255,255,.2)", borderRadius: 10, width: 44, height: 44, cursor: "pointer", fontSize: 20, color: "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
+          </div>
+          {nota && <div style={{ marginTop: "1.5rem", display: "flex", gap: "1.5rem", alignItems: "center", flexWrap: "wrap" }}><Estrelas nota={nota} tam={28} /><Pilula txt={st.label} cor={st.cor} bg={st.bg} g /></div>}
+        </div>
+        <div style={{ padding: "2rem 2.5rem 2.5rem" }}>
+          {dimStats.map(({ d, stats, media, obs: obsD }) => {
+            const pc = PESO_COR[d.peso];
+            return (
+              <div key={d.id} style={{ marginBottom: "2rem", paddingBottom: "2rem", borderBottom: `1.5px solid ${T.borda}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 12, color: T.cinzaCla, fontFamily: "sans-serif" }}>{d.num}</span>
+                    <span style={{ fontSize: 16, color: T.tinta }}>{d.nome}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}><Pilula txt={d.peso} cor={pc.c} bg={pc.bg} /><Pilula txt={`×${d.mult}`} cor={T.grafite} bg={T.areia} />{media && <Estrelas nota={media} tam={18} />}</div>
+                </div>
+                {stats.map(({ p, vals, media: pMedia }) => (
+                  <div key={p} style={{ marginBottom: "1rem", paddingLeft: "1rem", borderLeft: `3px solid ${T.borda}` }}>
+                    <p style={{ fontSize: 14, color: T.grafite, margin: "0 0 8px", lineHeight: 1.6 }}>{p}</p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      {avs.map((av, i) => (
+                        <div key={i} style={{ background: T.creme, borderRadius: 8, padding: "4px 10px", fontSize: 13, color: T.tinta, fontFamily: "sans-serif", display: "flex", gap: 6, alignItems: "center" }}>
+                          <span style={{ color: T.cinzaCla }}>{av.nome.split(" ")[0]}</span>
+                          <span style={{ color: "#C8860A" }}>{"★".repeat(vals[i] || 0)}</span>
+                          <span style={{ fontWeight: 700 }}>{vals[i] ?? "—"}</span>
+                        </div>
+                      ))}
+                      {pMedia && <span style={{ fontSize: 13, color: T.floresta, fontWeight: 700, fontFamily: "sans-serif", marginLeft: 4 }}>Média: {pMedia}</span>}
+                    </div>
+                  </div>
+                ))}
+                {obsD.length > 0 && (
+                  <div style={{ marginTop: "1rem" }}>
+                    <div style={{ fontSize: 11, color: T.cinzaCla, fontFamily: "sans-serif", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 8 }}>Observações dos avaliadores</div>
+                    {obsD.map((o, i) => (
+                      <div key={i} style={{ background: T.creme, borderRadius: 10, padding: "12px 16px", marginBottom: 8, borderLeft: `4px solid ${T.verde}` }}>
+                        <span style={{ fontSize: 12, color: T.verde, fontFamily: "sans-serif", fontWeight: 700 }}>{o.nome} — </span>
+                        <span style={{ fontSize: 14, color: T.tinta, lineHeight: 1.7, fontStyle: "italic" }}>"{o.txt}"</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div style={{ background: nota >= 3.5 ? T.menta : nota >= 2.5 ? T.ouroCla : T.terraCla, border: `2px solid ${nota >= 3.5 ? T.verde : nota >= 2.5 ? T.ouro : T.terra}40`, borderRadius: 14, padding: "1.5rem 2rem" }}>
+            <div style={{ fontSize: 16, color: T.tinta, marginBottom: 8 }}>Recomendação do comitê</div>
+            <p style={{ margin: 0, fontSize: 15, color: T.grafite, lineHeight: 1.8 }}>
+              {nota >= 3.5
+                ? `A experiência obteve nota ${nota.toFixed(1)} e está recomendada para certificação pelo Lab Viva Olinda. Os critérios essenciais foram atendidos com consistência.`
+                : nota >= 2.5
+                ? `A experiência obteve nota ${nota.toFixed(1)} — aprovação condicional. Recomendamos atenção às dimensões com pontuação abaixo de 3 para alcançar a certificação plena dentro do prazo de 90 dias.`
+                : `A experiência obteve nota ${nota?.toFixed(1) ?? "—"} e não atingiu o mínimo para certificação neste ciclo. Utilize o detalhamento por dimensão acima para identificar os principais pontos de melhoria antes de uma reavaliação.`}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TabAdmin({ adminOk, senha, setSenha, onLogin, exps, salvar }) {
   const [vista, setVista] = useState("lista");
   const [editId, setEditId] = useState(null);
   const [editData, setEditData] = useState(null);
   const [modal, setModal] = useState(null);
+  const [relatorioId, setRelatorioId] = useState(null);
   const [novo, setNovo] = useState({ nome: "", categoria: "", descricao: "", status: "avaliacao", reavaliacao: "" });
   if (!adminOk) return (
     <div style={{ maxWidth: 440, margin: "5rem auto", textAlign: "center" }}>
@@ -441,9 +542,11 @@ function TabAdmin({ adminOk, senha, setSenha, onLogin, exps, salvar }) {
     );
   })();
 
+  const expRelatorio = relatorioId ? exps.find(e => e.id === relatorioId) : null;
   return (
     <div>
       {modalEl}
+      <RelatorioModal exp={expRelatorio} onClose={() => setRelatorioId(null)} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2rem", flexWrap: "wrap", gap: "1rem" }}>
         <h2 style={{ margin: 0, fontSize: 24, fontWeight: 400, color: T.tinta }}>Painel Admin</h2>
         <div style={{ display: "flex", gap: 10 }}><Btn label="Lista" onClick={() => { setVista("lista"); setEditId(null); }} tipo={vista === "lista" ? "active" : "default"} /><Btn label="+ Nova experiência" onClick={() => setVista("nova")} tipo={vista === "nova" ? "active" : "default"} /></div>
@@ -467,6 +570,8 @@ function TabAdmin({ adminOk, senha, setSenha, onLogin, exps, salvar }) {
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0 }}>
                   <Btn label={isEd ? "Cancelar" : "Editar"} onClick={() => { if (isEd) { setEditId(null); setEditData(null); } else { setEditId(exp.id); setEditData({ nome: exp.nome, categoria: exp.categoria, descricao: exp.descricao, status: exp.status, reavaliacao: exp.reavaliacao, sintese: exp.sintese }); } }} />
                   {isEd && <Btn label="Salvar" onClick={salvarEd} tipo="primary" />}
+                  {nAv >= 3 && <Btn label="📄 Relatório" onClick={() => setRelatorioId(exp.id)} tipo="ghost" />}
+                  {nAv >= 3 && <Btn label="✦ Gerar síntese pública" onClick={async () => { const s = gerarSintese(exp); await salvar(exps.map(e => e.id === exp.id ? { ...e, sintese: s } : e)); }} tipo="ghost" />}
                   <Btn label="Excluir" onClick={() => excluirExp(exp.id)} tipo="danger" />
                 </div>
               </div>
