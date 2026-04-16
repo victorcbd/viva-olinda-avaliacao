@@ -399,52 +399,177 @@ function TabAvaliar({ codigo, setCodigo, exp, exps, salvar }) {
   );
 }
 
-function RelatorioModal({ exp, onClose }) {
-  if (!exp) return null;
+function buildRelatorioData(exp) {
   const avs = exp.avaliacoes || [];
   const nota = calcNota(avs);
   const st = STATUS[exp.status] || STATUS.avaliacao;
   const hoje = new Date().toLocaleDateString("pt-BR");
   const dimStats = DIMS.map(d => {
-    const stats = d.perguntas.map((p, i) => { const key = d.id + "_" + (i + 1); const vals = avs.map(a => a.notas?.[key]).filter(v => v !== undefined); const media = vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : null; return { p, key, vals, media }; });
+    const stats = d.perguntas.map((p, i) => { const key = d.id + "_" + (i + 1); const vals = avs.map(a => a.notas?.[key]).filter(v => v !== undefined); const media = vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1) : null; return { p, vals, media }; });
     const valid = stats.filter(s => s.media !== null);
-    const media = valid.length ? +(valid.reduce((a, s) => a + s.media, 0) / valid.length).toFixed(2) : null;
-    const obs = avs.map((av, i) => av.obs?.[d.id]?.trim() ? { nome: av.nome, txt: av.obs[d.id].trim() } : null).filter(Boolean);
+    const media = valid.length ? +(valid.reduce((a, s) => a + s.media, 0) / valid.length).toFixed(1) : null;
+    const obs = avs.map(av => av.obs?.[d.id]?.trim() || null).filter(Boolean);
     return { d, stats, media, obs };
   });
+  const sorted = [...dimStats].filter(x => x.media !== null).sort((a, b) => b.media - a.media);
+  const pontoForte = sorted[0]?.d.nome || "—";
+  const pontoAtencao = [...sorted].reverse()[0]?.d.nome || "—";
+  const notaLabel = nota >= 4.5 ? "Excelente" : nota >= 4 ? "Muito Bom" : nota >= 3.5 ? "Bom" : nota >= 2.5 ? "Regular" : "Insatisfatório";
+  const notaColor = nota >= 3.5 ? T.floresta : nota >= 2.5 ? T.ouro : T.terra;
+  const conclusaoTexto = nota >= 3.5
+    ? `A experiência "${exp.nome}" demonstrou consistência nos critérios avaliados, com destaque para ${pontoForte}. Os avaliadores reconhecem o seu potencial dentro do ecossistema turístico do Sítio Histórico de Olinda. O comitê recomenda a certificação junto ao Lab Viva Olinda.`
+    : nota >= 2.5
+    ? `A experiência "${exp.nome}" apresenta base sólida, com pontos de melhoria identificados, especialmente em ${pontoAtencao}. Com as adequações necessárias dentro do prazo de 90 dias, a experiência tem potencial para alcançar a certificação plena.`
+    : `A experiência "${exp.nome}" necessita de reformulações em ${pontoAtencao} para atingir os padrões do Lab Viva Olinda. O comitê recomenda reavaliação após as melhorias indicadas neste relatório.`;
+  return { avs, nota, st, hoje, dimStats, pontoForte, pontoAtencao, notaLabel, notaColor, conclusaoTexto };
+}
+
+function exportarPDF(exp) {
+  const { avs, nota, st, hoje, dimStats, pontoForte, pontoAtencao, notaLabel, conclusaoTexto } = buildRelatorioData(exp);
+  const notaHex = nota >= 3.5 ? "#1D6E4E" : nota >= 2.5 ? "#A06B00" : "#8B3A1A";
+  const bgConc = nota >= 3.5 ? "#C8EDD9" : nota >= 2.5 ? "#FFF0CC" : "#FAEAE0";
+  const starsStr = n => n ? "★".repeat(Math.round(n)) + "☆".repeat(5 - Math.round(n)) : "";
+  const dimRows = dimStats.map(({ d, stats, media, obs }) => {
+    const barPct = media ? Math.round((media / 5) * 100) : 0;
+    const barC = media >= 3.5 ? "#1D6E4E" : media >= 2.5 ? "#A06B00" : "#8B3A1A";
+    const pc = d.peso === "Essencial" ? { bg: "#C8EDD9", c: "#0A3320" } : d.peso === "Importante" ? { bg: "#FFF0CC", c: "#A06B00" } : { bg: "#E8DFD0", c: "#4A4A3E" };
+    const pergHtml = stats.map(({ p, media: pm }) =>
+      `<div class="perg-row"><span class="perg-txt">${p}</span><span class="perg-nota" style="color:${pm >= 3.5 ? "#1D6E4E" : pm >= 2.5 ? "#A06B00" : pm ? "#8B3A1A" : "#9E9C8F"}">${pm ? starsStr(pm) + " " + pm : "—"}</span></div>`
+    ).join("");
+    const obsHtml = obs.length ? `<div class="obs-section"><div class="obs-label">Observações dos avaliadores</div>${obs.map(t => `<div class="obs-item">"${t}"</div>`).join("")}</div>` : "";
+    return `<div class="dim-block">
+      <div class="dim-header">
+        <div class="dim-title"><span class="dim-num">${d.num}</span><span class="dim-name">${d.nome}</span><span class="dim-peso" style="background:${pc.bg};color:${pc.c}">${d.peso} ×${d.mult}</span></div>
+        <div class="dim-avg" style="color:${barC}">${media ? starsStr(media) + "  " + media : "—"}</div>
+      </div>
+      <div class="bar-wrap"><div class="bar-fill" style="width:${barPct}%;background:${barC}"></div></div>
+      <div class="pergs">${pergHtml}</div>${obsHtml}
+    </div>`;
+  }).join("");
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Relatório – ${exp.nome}</title>
+<style>
+@page{size:A4;margin:18mm 16mm 22mm}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Georgia,"Times New Roman",serif;color:#1A1A14;background:#fff;font-size:11pt;line-height:1.6}
+.toolbar{background:#f5f5f0;padding:14px 24px;display:flex;gap:12px;align-items:center;font-family:sans-serif;font-size:13px;color:#444;border-bottom:1px solid #ddd}
+.toolbar button{padding:9px 22px;border-radius:8px;cursor:pointer;font-size:13px;font-family:sans-serif;border:none}
+.btn-print{background:#0A3320;color:#fff}
+.btn-close{background:transparent;color:#666;border:1.5px solid #ccc !important}
+.cover{background:#0A3320;color:#fff;padding:38px 44px 32px;margin-bottom:30px}
+.cover-label{font-size:8pt;letter-spacing:.2em;text-transform:uppercase;color:rgba(200,237,217,.65);font-family:sans-serif;margin-bottom:12px}
+.cover-title{font-size:22pt;font-weight:400;margin-bottom:8px;line-height:1.2}
+.cover-sub{font-size:10pt;color:rgba(200,237,217,.7);font-family:sans-serif;margin-bottom:22px}
+.cover-row{display:flex;align-items:flex-end;gap:28px;flex-wrap:wrap}
+.score-num{font-size:40pt;color:#fff;font-weight:400;line-height:1}
+.score-of{font-size:11pt;color:rgba(200,237,217,.6);font-family:sans-serif;margin-bottom:6px}
+.score-stars{font-size:18pt;color:#C8860A;letter-spacing:2px}
+.score-label{font-size:10pt;color:rgba(200,237,217,.85);font-family:sans-serif;letter-spacing:.06em;text-transform:uppercase;margin-top:4px}
+.pill{display:inline-block;padding:5px 16px;border-radius:99px;font-size:9pt;font-weight:700;font-family:sans-serif;letter-spacing:.06em}
+.sec-title{font-size:8.5pt;letter-spacing:.18em;text-transform:uppercase;color:#9E9C8F;font-family:sans-serif;margin:28px 0 16px;padding-bottom:8px;border-bottom:1.5px solid #D5CFC3}
+.dim-block{margin-bottom:22px;padding-bottom:22px;border-bottom:1px solid #E8DFD0;page-break-inside:avoid}
+.dim-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;gap:10px}
+.dim-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dim-num{font-size:9pt;color:#9E9C8F;font-family:sans-serif}
+.dim-name{font-size:12pt;color:#1A1A14}
+.dim-peso{font-size:8pt;font-family:sans-serif;font-weight:700;padding:2px 10px;border-radius:99px}
+.dim-avg{font-size:12pt;letter-spacing:1px;white-space:nowrap}
+.bar-wrap{background:#F5F0E8;border-radius:3px;height:4px;margin-bottom:12px;overflow:hidden}
+.bar-fill{height:4px;border-radius:3px}
+.pergs{display:flex;flex-direction:column;gap:0}
+.perg-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:7px 0;border-bottom:1px dashed #E8DFD0}
+.perg-row:last-child{border-bottom:none}
+.perg-txt{font-size:10pt;color:#4A4A3E;flex:1;line-height:1.5}
+.perg-nota{font-size:10pt;font-family:sans-serif;font-weight:700;white-space:nowrap;letter-spacing:1px}
+.obs-section{margin-top:10px}
+.obs-label{font-size:8pt;color:#9E9C8F;font-family:sans-serif;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}
+.obs-item{background:#F5F0E8;border-left:3px solid #1D6E4E;padding:8px 12px;margin-bottom:5px;font-size:10pt;color:#1A1A14;font-style:italic;line-height:1.6;border-radius:0 6px 6px 0}
+.conclusion{background:${bgConc};border:2px solid ${notaHex}30;border-radius:12px;padding:24px 28px;margin-top:30px;page-break-inside:avoid}
+.conclusion-title{font-size:14pt;color:#1A1A14;margin-bottom:14px;font-weight:400}
+.conclusion-body{font-size:11pt;color:#4A4A3E;line-height:1.9;margin-bottom:20px}
+.conclusion-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.c-item{background:#fff;border-radius:8px;padding:12px 16px}
+.c-label{font-size:8pt;color:#9E9C8F;text-transform:uppercase;letter-spacing:.1em;font-family:sans-serif;margin-bottom:4px}
+.c-val{font-size:11pt;color:#1A1A14}
+.footer{margin-top:36px;padding-top:14px;border-top:1.5px solid #D5CFC3;display:flex;justify-content:space-between;font-size:8pt;color:#9E9C8F;font-family:sans-serif}
+@media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}.toolbar{display:none}}
+</style></head><body>
+<div class="toolbar"><span>Relatório pronto.</span><button class="btn-print" onclick="window.print()">Imprimir / Salvar PDF</button><button class="btn-close" onclick="window.close()">Fechar</button></div>
+<div class="cover">
+  <div class="cover-label">Lab Viva Olinda · Comitê de Experiências Turísticas · Relatório de Avaliação</div>
+  <div class="cover-title">${exp.nome}</div>
+  <div class="cover-sub">Gerado em ${hoje} · ${avs.length} avaliador${avs.length !== 1 ? "es independentes" : " independente"} · ${exp.categoria || "Experiência turística"}</div>
+  <div class="cover-row">
+    <div><div class="score-num">${nota?.toFixed(1) ?? "—"}</div><div class="score-of">de 5,0</div></div>
+    <div><div class="score-stars">${nota ? starsStr(nota) : ""}</div><div class="score-label">${notaLabel}</div></div>
+    <div style="align-self:center"><span class="pill" style="background:${bgConc};color:${notaHex}">${st.label}</span></div>
+  </div>
+</div>
+<div class="sec-title">Avaliação por dimensão</div>
+${dimRows}
+<div class="conclusion">
+  <div class="conclusion-title">✦ Conclusão e Recomendação do Comitê</div>
+  <div class="conclusion-body">${conclusaoTexto}</div>
+  <div class="conclusion-grid">
+    <div class="c-item"><div class="c-label">Ponto de destaque</div><div class="c-val">${pontoForte}</div></div>
+    <div class="c-item"><div class="c-label">Área prioritária de melhoria</div><div class="c-val">${pontoAtencao}</div></div>
+    <div class="c-item"><div class="c-label">Total de avaliadores</div><div class="c-val">${avs.length} curadores independentes</div></div>
+    <div class="c-item"><div class="c-label">Nota final ponderada</div><div class="c-val" style="color:${notaHex};font-weight:700">${nota?.toFixed(2) ?? "—"} / 5,00</div></div>
+  </div>
+</div>
+<div class="footer"><span>Lab Viva Olinda · OCCA Open Innovation Lab · Comitê de Experiências Turísticas de Olinda</span><span>Sítio Histórico de Olinda · UNESCO · ${hoje}</span></div>
+</body></html>`;
+  const win = window.open("", "_blank");
+  if (win) { win.document.write(html); win.document.close(); }
+}
+
+function RelatorioModal({ exp, onClose }) {
+  if (!exp) return null;
+  const { avs, nota, st, hoje, dimStats, pontoForte, pontoAtencao, notaColor, conclusaoTexto } = buildRelatorioData(exp);
+  const concBg = nota >= 3.5 ? T.menta : nota >= 2.5 ? T.ouroCla : T.terraCla;
+  const concBorder = nota >= 3.5 ? T.verde : nota >= 2.5 ? T.ouro : T.terra;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(10,30,20,.72)", zIndex: 2000, overflowY: "auto", padding: "2rem 1rem" }}>
       <div style={{ background: T.branco, borderRadius: 20, maxWidth: 780, margin: "0 auto", border: `2px solid ${T.verde}` }}>
+        {/* Cabeçalho */}
         <div style={{ background: T.floresta, borderRadius: "18px 18px 0 0", padding: "2.5rem 2.5rem 2rem" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
             <div>
-              <div style={{ fontSize: 11, letterSpacing: ".2em", textTransform: "uppercase", color: "rgba(200,237,217,.65)", fontFamily: "sans-serif", marginBottom: 10 }}>Relatório Interno de Avaliação · Lab Viva Olinda</div>
+              <div style={{ fontSize: 11, letterSpacing: ".2em", textTransform: "uppercase", color: "rgba(200,237,217,.65)", fontFamily: "sans-serif", marginBottom: 10 }}>Relatório de Avaliação · Lab Viva Olinda</div>
               <h2 style={{ fontSize: "clamp(1.3rem,3vw,1.8rem)", color: "white", margin: "0 0 8px", fontWeight: 400 }}>{exp.nome}</h2>
-              <p style={{ margin: 0, fontSize: 14, color: "rgba(200,237,217,.7)", fontFamily: "sans-serif" }}>Gerado em {hoje} · {avs.length} avaliador{avs.length !== 1 ? "es" : ""} · Cód. {exp.code}</p>
+              <p style={{ margin: 0, fontSize: 14, color: "rgba(200,237,217,.7)", fontFamily: "sans-serif" }}>Gerado em {hoje} · {avs.length} avaliador{avs.length !== 1 ? "es independentes" : " independente"}</p>
             </div>
-            <button onClick={onClose} style={{ background: "rgba(255,255,255,.1)", border: "1.5px solid rgba(255,255,255,.2)", borderRadius: 10, width: 44, height: 44, cursor: "pointer", fontSize: 20, color: "white", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
+            <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+              <button onClick={() => exportarPDF(exp)} style={{ background: T.verdeVivo, border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontSize: 14, color: "white", fontFamily: "Georgia,serif", display: "flex", alignItems: "center", gap: 8 }}>⬇ Exportar PDF</button>
+              <button onClick={onClose} style={{ background: "rgba(255,255,255,.1)", border: "1.5px solid rgba(255,255,255,.2)", borderRadius: 10, width: 44, height: 44, cursor: "pointer", fontSize: 20, color: "white", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            </div>
           </div>
           {nota && <div style={{ marginTop: "1.5rem", display: "flex", gap: "1.5rem", alignItems: "center", flexWrap: "wrap" }}><Estrelas nota={nota} tam={28} /><Pilula txt={st.label} cor={st.cor} bg={st.bg} g /></div>}
         </div>
         <div style={{ padding: "2rem 2.5rem 2.5rem" }}>
+          {/* Dimensões */}
           {dimStats.map(({ d, stats, media, obs: obsD }) => {
             const pc = PESO_COR[d.peso];
+            const barColor = media >= 3.5 ? T.floresta : media >= 2.5 ? T.ouro : T.terra;
             return (
               <div key={d.id} style={{ marginBottom: "2rem", paddingBottom: "2rem", borderBottom: `1.5px solid ${T.borda}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap", gap: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ fontSize: 12, color: T.cinzaCla, fontFamily: "sans-serif" }}>{d.num}</span>
                     <span style={{ fontSize: 16, color: T.tinta }}>{d.nome}</span>
                   </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}><Pilula txt={d.peso} cor={pc.c} bg={pc.bg} /><Pilula txt={`×${d.mult}`} cor={T.grafite} bg={T.areia} />{media && <Estrelas nota={media} tam={18} />}</div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}><Pilula txt={d.peso} cor={pc.c} bg={pc.bg} /><Pilula txt={`×${d.mult}`} cor={T.grafite} bg={T.areia} />{media && <Estrelas nota={+media} tam={18} />}</div>
+                </div>
+                {/* Barra visual */}
+                <div style={{ background: T.borda, borderRadius: 4, height: 5, marginBottom: 14, overflow: "hidden" }}>
+                  <div style={{ height: 5, borderRadius: 4, background: barColor, width: `${media ? (media / 5) * 100 : 0}%`, transition: "width .4s" }} />
                 </div>
                 {stats.map(({ p, vals, media: pMedia }) => (
                   <div key={p} style={{ marginBottom: "1rem", paddingLeft: "1rem", borderLeft: `3px solid ${T.borda}` }}>
                     <p style={{ fontSize: 14, color: T.grafite, margin: "0 0 8px", lineHeight: 1.6 }}>{p}</p>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      {avs.map((av, i) => (
+                      {avs.map((_, i) => (
                         <div key={i} style={{ background: T.creme, borderRadius: 8, padding: "4px 10px", fontSize: 13, color: T.tinta, fontFamily: "sans-serif", display: "flex", gap: 6, alignItems: "center" }}>
-                          <span style={{ color: T.cinzaCla }}>{av.nome.split(" ")[0]}</span>
+                          <span style={{ color: T.cinzaCla }}>Av. {i + 1}</span>
                           <span style={{ color: "#C8860A" }}>{"★".repeat(vals[i] || 0)}</span>
                           <span style={{ fontWeight: 700 }}>{vals[i] ?? "—"}</span>
                         </div>
@@ -455,11 +580,10 @@ function RelatorioModal({ exp, onClose }) {
                 ))}
                 {obsD.length > 0 && (
                   <div style={{ marginTop: "1rem" }}>
-                    <div style={{ fontSize: 11, color: T.cinzaCla, fontFamily: "sans-serif", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 8 }}>Observações dos avaliadores</div>
-                    {obsD.map((o, i) => (
+                    <div style={{ fontSize: 11, color: T.cinzaCla, fontFamily: "sans-serif", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 8 }}>Observações</div>
+                    {obsD.map((txt, i) => (
                       <div key={i} style={{ background: T.creme, borderRadius: 10, padding: "12px 16px", marginBottom: 8, borderLeft: `4px solid ${T.verde}` }}>
-                        <span style={{ fontSize: 12, color: T.verde, fontFamily: "sans-serif", fontWeight: 700 }}>{o.nome} — </span>
-                        <span style={{ fontSize: 14, color: T.tinta, lineHeight: 1.7, fontStyle: "italic" }}>"{o.txt}"</span>
+                        <span style={{ fontSize: 14, color: T.tinta, lineHeight: 1.7, fontStyle: "italic" }}>"{txt}"</span>
                       </div>
                     ))}
                   </div>
@@ -467,15 +591,18 @@ function RelatorioModal({ exp, onClose }) {
               </div>
             );
           })}
-          <div style={{ background: nota >= 3.5 ? T.menta : nota >= 2.5 ? T.ouroCla : T.terraCla, border: `2px solid ${nota >= 3.5 ? T.verde : nota >= 2.5 ? T.ouro : T.terra}40`, borderRadius: 14, padding: "1.5rem 2rem" }}>
-            <div style={{ fontSize: 16, color: T.tinta, marginBottom: 8 }}>Recomendação do comitê</div>
-            <p style={{ margin: 0, fontSize: 15, color: T.grafite, lineHeight: 1.8 }}>
-              {nota >= 3.5
-                ? `A experiência obteve nota ${nota.toFixed(1)} e está recomendada para certificação pelo Lab Viva Olinda. Os critérios essenciais foram atendidos com consistência.`
-                : nota >= 2.5
-                ? `A experiência obteve nota ${nota.toFixed(1)} — aprovação condicional. Recomendamos atenção às dimensões com pontuação abaixo de 3 para alcançar a certificação plena dentro do prazo de 90 dias.`
-                : `A experiência obteve nota ${nota?.toFixed(1) ?? "—"} e não atingiu o mínimo para certificação neste ciclo. Utilize o detalhamento por dimensão acima para identificar os principais pontos de melhoria antes de uma reavaliação.`}
-            </p>
+          {/* Conclusão */}
+          <div style={{ background: concBg, border: `2px solid ${concBorder}40`, borderRadius: 16, padding: "1.75rem 2rem" }}>
+            <div style={{ fontSize: 17, color: T.tinta, marginBottom: "1rem", display: "flex", alignItems: "center", gap: 10 }}><span style={{ color: T.verde }}>✦</span> Conclusão e Recomendação do Comitê</div>
+            <p style={{ fontSize: 15, color: T.grafite, lineHeight: 1.9, margin: "0 0 1.5rem" }}>{conclusaoTexto}</p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {[["Ponto de destaque", pontoForte], ["Área prioritária de melhoria", pontoAtencao], ["Total de avaliadores", `${avs.length} curadores independentes`], ["Nota final ponderada", nota ? `${nota.toFixed(2)} / 5,00` : "—"]].map(([label, val], i) => (
+                <div key={i} style={{ background: T.branco, borderRadius: 10, padding: "12px 16px" }}>
+                  <div style={{ fontSize: 11, color: T.cinzaCla, fontFamily: "sans-serif", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 4 }}>{label}</div>
+                  <div style={{ fontSize: 14, color: i === 3 ? notaColor : T.tinta, fontWeight: i === 3 ? 700 : 400 }}>{val}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
